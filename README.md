@@ -66,7 +66,10 @@ records manually.
 Test locally:
 
 ```bash
-streamlit run streamlit_app.py
+streamlit run streamlit_app.py 
+OR
+python -m streamlit run streamlit_app.py
+
 ```
 
 Open the URL it prints, confirm the Home page lists both constituencies,

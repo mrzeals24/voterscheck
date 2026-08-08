@@ -16,7 +16,6 @@ from pathlib import Path
 import streamlit as st
 
 DB_PATH = Path(__file__).parent / "data.db"
-ALL_BOOTHS = "All booths in this constituency"
 
 st.set_page_config(
     page_title="Voter Deletion List Search",
@@ -64,16 +63,17 @@ def get_booths(constituency: str):
     return [row[0] for row in cur.fetchall()]
 
 
-def search(constituency: str, booth: str, name: str, epic: str):
+def search(constituency: str, booths: list, name: str, epic: str):
     conn = get_connection()
     query = (
         "SELECT constituency, booth, part_name, epic_number, elector_name, "
         "relative_details, age, reason FROM electors WHERE constituency = ?"
     )
     params = [constituency]
-    if booth and booth != ALL_BOOTHS:
-        query += " AND booth = ?"
-        params.append(booth)
+    if booths:
+        placeholders = ", ".join("?" for _ in booths)
+        query += f" AND booth IN ({placeholders})"
+        params.extend(booths)
     if name:
         # LOWER() on both sides makes this fully case-insensitive regardless
         # of whether the source PDF stored the name in caps or mixed case.
@@ -117,11 +117,11 @@ def render_constituency_page(constituency: str, home_page):
         "shifted, deceased, or already enrolled elsewhere)."
     )
 
-    booth_options = [ALL_BOOTHS] + get_booths(constituency)
+    booth_options = get_booths(constituency)
 
     with st.form(f"search_form_{slugify(constituency)}"):
-        booth_choice = st.selectbox(
-            "Booth (optional — search across all booths if left as-is)",
+        booth_choices = st.multiselect(
+            "Booth (optional — check one or more; leave empty to search all booths)",
             booth_options,
         )
         name_input = st.text_input(
@@ -134,7 +134,7 @@ def render_constituency_page(constituency: str, home_page):
         if not name_input and not epic_input:
             st.warning("Enter a name or EPIC number to search.")
         else:
-            cols, rows = search(constituency, booth_choice, name_input, epic_input)
+            cols, rows = search(constituency, booth_choices, name_input, epic_input)
             if not rows:
                 st.info("No matching records found in the deletion list.")
             else:
