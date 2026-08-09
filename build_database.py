@@ -1,16 +1,21 @@
 """
 build_database.py
 
-Parses all voter-deletion-list PDFs in a folder (Karnataka CEO format) into a
-single SQLite database that the Streamlit search app reads from.
+Parses voter-deletion-list PDFs (Karnataka CEO format) and writes ONE SQLite
+file PER CONSTITUENCY (e.g. data_175.db, data_161.db) instead of one shared
+database. This means adding a new constituency only touches its own file —
+existing constituencies' files, and their Git/LFS history, are untouched.
 
 Usage:
-    python build_database.py --pdf-dir ./pdfs --db-path data.db
+    python build_database.py --pdf-dir ./pdfs --db-dir .
 
-Run this locally once (or whenever you add new PDFs), then commit the
-resulting data.db to your repo. The Streamlit app never touches the PDFs
-directly — it only queries data.db. This keeps the deployed app fast and
-avoids re-parsing PDFs on every search.
+PDFs can be anywhere under --pdf-dir (organize into per-constituency
+subfolders for your own convenience — folder names don't matter, the actual
+Constituency/Booth values always come from each PDF's own header text).
+
+After a successful run, this prints the exact line to add/verify in
+constituencies.txt for each constituency it found, so the Streamlit app
+knows to load it.
 
 If a PDF's "AC: ...; Part: ..." header line can't be found/parsed on page 1,
 that PDF is SKIPPED entirely (no partial/garbage rows) and listed in
@@ -21,6 +26,7 @@ values manually.
 import argparse
 import re
 import sqlite3
+from collections import defaultdict
 from pathlib import Path
 
 import pdfplumber
@@ -106,7 +112,8 @@ def parse_pdf(path: Path) -> list[dict]:
     return records
 
 
-def build_database(pdf_dir: Path, db_path: Path) -> None:
+def write_constituency_db(db_path: Path, records: list[dict]) -> None:
+    """(Re)write a single constituency's own SQLite file from its records."""
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute("DROP TABLE IF EXISTS electors")
@@ -131,7 +138,31 @@ def build_database(pdf_dir: Path, db_path: Path) -> None:
         )
         """
     )
+    for r in records:
+        cur.execute(
+            """
+            INSERT INTO electors (
+                constituency, booth, ac_number, ac_name, part_number, part_name,
+                s_no, serial_no, epic_number, elector_name,
+                relative_details, age, reason, source_file
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                r["constituency"], r["booth"], r["ac_number"], r["ac_name"],
+                r["part_number"], r["part_name"],
+                r["s_no"], r["serial_no"], r["epic_number"], r["elector_name"],
+                r["relative_details"], r["age"], r["reason"], r["source_file"],
+            ),
+        )
+    cur.execute("CREATE INDEX idx_epic ON electors(epic_number)")
+    cur.execute("CREATE INDEX idx_name ON electors(elector_name)")
+    cur.execute("CREATE INDEX idx_constituency ON electors(constituency)")
+    cur.execute("CREATE INDEX idx_booth ON electors(booth)")
+    conn.commit()
+    conn.close()
 
+
+def build_database(pdf_dir: Path, db_dir: Path) -> None:
     pdf_files = sorted(pdf_dir.rglob("*.pdf"))  # rglob: works whether PDFs
     # sit directly in pdf_dir or are organized into per-constituency
     # subfolders (e.g. pdfs/175-Bommanahalli/*.pdf, pdfs/161-CV-RamanNagar/*.pdf).
@@ -141,7 +172,11 @@ def build_database(pdf_dir: Path, db_path: Path) -> None:
         print(f"No PDFs found in {pdf_dir} (searched recursively)")
         return
 
-    total = 0
+    db_dir.mkdir(parents=True, exist_ok=True)
+
+    # Group parsed records by AC number, so each constituency ends up in its
+    # own file regardless of how its PDFs are organized on disk.
+    records_by_ac = defaultdict(list)
     failed = []
     for i, path in enumerate(pdf_files, start=1):
         try:
@@ -150,37 +185,28 @@ def build_database(pdf_dir: Path, db_path: Path) -> None:
             print(f"[{i}/{len(pdf_files)}] FAILED: {path.name} — {e}")
             failed.append((path.name, str(e)))
             continue
-        for r in records:
-            cur.execute(
-                """
-                INSERT INTO electors (
-                    constituency, booth, ac_number, ac_name, part_number, part_name,
-                    s_no, serial_no, epic_number, elector_name,
-                    relative_details, age, reason, source_file
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    r["constituency"], r["booth"], r["ac_number"], r["ac_name"],
-                    r["part_number"], r["part_name"],
-                    r["s_no"], r["serial_no"], r["epic_number"], r["elector_name"],
-                    r["relative_details"], r["age"], r["reason"], r["source_file"],
-                ),
-            )
-        total += len(records)
-        print(f"[{i}/{len(pdf_files)}] {path.name}: {len(records)} records "
-              f"({r['constituency']} / {r['booth']})")
+        ac_number = records[0]["ac_number"]
+        records_by_ac[ac_number].extend(records)
+        print(
+            f"[{i}/{len(pdf_files)}] {path.name}: {len(records)} records "
+            f"({records[0]['constituency']} / {records[0]['booth']})"
+        )
 
-    # Indexes for fast search / dropdown population
-    cur.execute("CREATE INDEX idx_epic ON electors(epic_number)")
-    cur.execute("CREATE INDEX idx_name ON electors(elector_name)")
-    cur.execute("CREATE INDEX idx_constituency ON electors(constituency)")
-    cur.execute("CREATE INDEX idx_booth ON electors(booth)")
+    if not records_by_ac:
+        print("\nNo constituencies produced any records — nothing written.")
+    else:
+        print(f"\nWriting {len(records_by_ac)} per-constituency database file(s)...")
+        print("\nAdd/verify these lines in constituencies.txt "
+              "(uncomment or add if missing):\n")
+        for ac_number, records in records_by_ac.items():
+            constituency = records[0]["constituency"]
+            db_filename = f"data_{ac_number}.db"
+            db_path = db_dir / db_filename
+            write_constituency_db(db_path, records)
+            print(f"  [{constituency}] -> {db_path}  ({len(records)} records)")
+            print(f"    {constituency}|{db_filename}")
 
-    conn.commit()
-    conn.close()
-
-    print(f"\nDone. {total} total records written to {db_path}")
-    print(f"Succeeded: {len(pdf_files) - len(failed)} / {len(pdf_files)} PDFs")
+    print(f"\nSucceeded: {len(pdf_files) - len(failed)} / {len(pdf_files)} PDFs")
 
     if failed:
         report_path = pdf_dir.parent / "failed_pdfs.txt"
@@ -199,6 +225,9 @@ def build_database(pdf_dir: Path, db_path: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pdf-dir", type=Path, default=Path("pdfs"))
-    parser.add_argument("--db-path", type=Path, default=Path("data.db"))
+    parser.add_argument(
+        "--db-dir", type=Path, default=Path("."),
+        help="Folder to write per-constituency .db files into (default: current folder)"
+    )
     args = parser.parse_args()
-    build_database(args.pdf_dir, args.db_path)
+    build_database(args.pdf_dir, args.db_dir)

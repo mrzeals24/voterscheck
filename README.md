@@ -1,44 +1,112 @@
-# Voter Deletion List Search — multi-constituency
+# Voter Deletion List Search — one database per constituency
 
-A free, mobile-friendly app where each constituency gets its own page (its
-own URL) with a search form, plus a Home page that links out to all of
-them. Currently loaded with two example constituencies: **175-Bommanahalli**
-and **161-C.V. RamannNagar**.
+Each constituency gets its **own** SQLite file (e.g. `data_175.db`,
+`data_161.db`) instead of one shared database, plus its own page in the
+app. A single manifest file (`constituencies.txt`) controls both which
+constituencies the app shows and which zips get extracted locally.
 
-## How it works
+## Why split per constituency
 
-- `build_database.py` — run **once locally** (and again whenever you add
-  new PDFs). Parses every PDF under `pdfs/` into a single SQLite file
-  (`data.db`) with proper columns and search indexes.
-- `streamlit_app.py` — the app itself. Reads the list of constituencies
-  straight out of `data.db` and **automatically builds one page per
-  constituency** (with its own URL, e.g. `.../175-bommanahalli`) plus a
-  Home page linking to each. You never hand-write or maintain page files —
-  add a new constituency's PDFs, rebuild `data.db`, redeploy, and its page
-  just appears.
+- **Smaller, targeted Git/LFS pushes.** Adding a new constituency only
+  creates a new file — existing constituencies' `.db` files, and their
+  Git/LFS history, are untouched. Previously, adding *any* constituency
+  meant re-uploading one giant combined file every time.
+- **Comment a line out to hide a constituency** from the Home page without
+  losing its mapping or deleting its data.
 
-Splitting it this way means the deployed app never has to parse PDFs live —
-it just queries an indexed database, which is fast even on free hosting.
+## Files
 
-## 1. Organize your PDFs by constituency
+- `constituencies.txt` — the manifest. One line per constituency, pipe
+  (`|`) separated. Comment a line with a leading `#` to hide it from the
+  Streamlit app AND skip it during PDF extraction.
+- `extract_pdfs.py` — reads the manifest, extracts every constituency's
+  zip whose `extract_needed` column is `True`.
+- `build_database.py` — parses PDFs and writes one `.db` file per
+  constituency it finds.
+- `streamlit_app.py` — the app. Reads the manifest to decide which pages
+  to build; each page opens only its own constituency's `.db` file.
+
+## Manifest format
 
 ```
-pdfs/
-├── 175-Bommanahalli/
-│   ├── part_279.pdf
-│   ├── part_280.pdf
-│   └── ...
-└── 161-CV-RamanNagar/
-    ├── part_1.pdf
-    └── ...
+# constituency|db_filename|zip_path|dest_path|extract_needed|enabled
+175-Bommanahalli|data_175.db|pdfs\AC175.zip|pdfs\175-Bommanahalli|False|True
+161-C.V. RamannNagar|data_161.db|pdfs\AC161.zip|pdfs\161-CV-RamanNagar|False|True
 ```
 
-The folder names are just for **your own organization** — the actual
-Constituency and Booth values shown in the app always come from each PDF's
-own header line ("AC: ...; Part: ..."), not the folder name. So folders can
-be named however's convenient for you.
+- `constituency` must exactly match the text `build_database.py` prints
+  after parsing that constituency's PDFs (copy it from there, don't retype
+  it, to avoid a mismatch).
+- `db_filename` is what the deployed Streamlit app actually reads.
+- `zip_path` / `dest_path` are used only by `extract_pdfs.py` (ignored by
+  the deployed app) and can be **relative to your project folder** — e.g.
+  `pdfs\AC175.zip` resolves against wherever `extract_pdfs.py` itself
+  lives, so nothing machine-specific needs to go in this file.
+- `extract_needed` — True/False, controls `extract_pdfs.py` only.
+- `enabled` — True/False, controls the Streamlit app only. Set to `False`
+  while you're still testing a new constituency locally (extraction and
+  `build_database.py` still work normally), then flip to `True` once
+  you're happy with the data and ready to make it public.
 
-## 2. Set up locally
+Two independent ways to hide a constituency:
+- **Comment the whole line** with a leading `#` — skipped everywhere (app
+  and extraction both ignore it).
+- **Set `enabled` to `False`** — stays out of the public app only; you can
+  keep extracting/rebuilding it locally while testing.
+
+## Workflow for adding a new constituency
+
+```powershell
+# 1. In constituencies.txt: add a new line (or uncomment an existing one),
+#    with extract_needed set to True for this constituency.
+
+# 2. Extract its PDFs from the zip
+python extract_pdfs.py
+
+# 3. Build just that constituency's .db file (safe to point at the whole
+#    pdfs/ folder — build_database.py groups by constituency automatically
+#    and only rewrites the file(s) for constituencies it actually finds
+#    PDFs for in this run)
+python build_database.py --pdf-dir pdfs\<new-constituency-folder> --db-dir .
+python build_database.py --pdf-dir pdfs\175-Bommanahalli --db-dir .
+
+# 4. Console output will print the exact manifest line for this
+#    constituency — confirm it matches what's already in constituencies.txt
+#    (or copy it in if this is a brand new constituency).
+
+# 5. Commit and push
+git add constituencies.txt data_<ac_number>.db
+git commit -m "Add <constituency> data"
+git push origin main
+
+# 6. On share.streamlit.io: Reboot app (see note below on why)
+```
+
+## Testing a new constituency before making it public
+
+```powershell
+# In constituencies.txt: add the new line with extract_needed=True and
+# enabled=False (so it's invisible on the live Home page for now)
+
+python extract_pdfs.py
+python build_database.py --pdf-dir pdfs\<new-constituency-folder> --db-dir .
+streamlit run streamlit_app.py   # confirm it's NOT on the Home page,
+                                  # but you can still verify data_<ac>.db
+                                  # locally (e.g. sqlite3 spot-checks)
+
+# Happy with it? Flip enabled to True in constituencies.txt, then:
+git add constituencies.txt data_<ac_number>.db
+git commit -m "Enable <constituency>"
+git push origin main
+```
+
+## Hiding a constituency without deleting it
+
+Just add a `#` at the start of its line in `constituencies.txt`, commit,
+push. Its `.db` file stays in the repo untouched — uncomment the line
+later to bring it back instantly, no rebuild needed.
+
+## Setup (first time)
 
 ```bash
 git clone <your-repo-url>
@@ -48,99 +116,37 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Build the database:
-
-```bash
-python build_database.py --pdf-dir pdfs --db-path data.db
-```
-
-This prints a per-file record count (with the Constituency/Booth it
-detected) and finishes with a total.
-
-**If a PDF's header can't be parsed** (the "AC: ...; Part: ..." line at the
-top of page 1 isn't found), that PDF is skipped entirely — no partial or
-guessed data gets written. A `failed_pdfs.txt` file is created listing which
-PDFs failed and why, so you can check them and, if needed, add those
-records manually.
-
 Test locally:
-
 ```bash
-python -m streamlit run streamlit_app.py
-OR
-streamlit run streamlit_app.py 
+streamlit run streamlit_app.py
 ```
 
-Open the URL it prints, confirm the Home page lists both constituencies,
-click into one, and try a search (e.g. "mohan").
+## Deploying free on Streamlit Community Cloud
 
-## 3. Push to GitHub
+1. Push your repo to a **public** GitHub repo (`data_*.db` files go through
+   Git LFS if any exceed 100MB — see `.gitattributes`).
+2. [share.streamlit.io](https://share.streamlit.io) → sign in with GitHub →
+   "New app" → select your repo → main file `streamlit_app.py` → Deploy.
+3. After pushing updates, Streamlit usually auto-redeploys within a minute
+   or two. If changes don't seem to show up (more likely after an LFS
+   history rewrite or manifest change), manually **Reboot app**: open your
+   app → "Manage app" (bottom-right) → ⋮ menu → "Reboot app".
 
-Create a **public** GitHub repo (required for Streamlit Community Cloud's
-free tier) and push:
-
-```bash
-git init
-git add streamlit_app.py build_database.py requirements.txt data.db pdfs README.md
-git commit -m "Multi-constituency voter search app"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
-
-Committing the raw `pdfs/` folder is optional (only `data.db` is actually
-used at runtime) — keeping them in the repo just makes it easy to rebuild
-`data.db` from scratch later or on another machine.
-
-**Important:** if `data.db` ever exceeds ~90-100MB (unlikely for a handful
-of constituencies), you'll need [Git LFS](https://git-lfs.com/).
-
-## 4. Deploy on Streamlit Community Cloud (free)
-
-1. Go to **[share.streamlit.io](https://share.streamlit.io)** and sign in
-   with GitHub (no credit card required).
-2. Click **"New app"**.
-3. Select your repository, branch (`main`), and main file path
-   (`streamlit_app.py`).
-4. Click **"Deploy"**.
-
-You get a public URL like `https://<your-app-name>.streamlit.app`. Each
-constituency automatically gets its own path under that same URL, e.g.:
-
-```
-https://<your-app-name>.streamlit.app/                    → Home (links to all)
-https://<your-app-name>.streamlit.app/175-bommanahalli    → Bommanahalli search
-https://<your-app-name>.streamlit.app/161-c-v-ramannnagar → C.V. RamannNagar search
-```
-
-Streamlit Community Cloud's free tier allows **unlimited public apps**, so
-this single-app/multi-page approach uses just one of them — no need to
-deploy a separate app per constituency.
-
-### Notes on the free tier
-
-- The app "sleeps" after a period of inactivity and wakes up on the next
-  visit (takes a few seconds) — normal for the free tier.
-- Free tier apps get ~1GB RAM. Since the app queries an indexed SQLite file
-  rather than loading everything into memory, this is comfortable even for
-  a few hundred thousand records across many constituencies.
-
-## 5. Adding a new constituency later
-
-```bash
-# add the new constituency's PDFs under pdfs/<any-folder-name>/
-python build_database.py --pdf-dir pdfs --db-path data.db
-git add data.db pdfs
-git commit -m "Add <constituency> data"
-git push
-```
-
-Streamlit Cloud redeploys automatically on push, and the new constituency's
-page appears on the Home page and in the sidebar — no code changes needed.
+Streamlit Community Cloud's free tier allows unlimited public apps, so this
+single-app/multi-page approach uses just one of them.
 
 ## Disclaimer shown to users
 
-This tool reflects only the PDFs that have been loaded into it and may not
-be fully current. Always confirm voter status on the official ECI /
-Karnataka CEO website before taking any action. This disclaimer is already
-shown in the app's footer.
+Every constituency page shows: this tool only reflects data present in the
+loaded PDFs and may not be fully current — always verify voter status on
+the official Karnataka CEO site
+([ceo.karnataka.gov.in/asddo.html](https://ceo.karnataka.gov.in/asddo.html))
+before taking any action.
+
+M K PRASHANTH · EPIC: WZU3136868
+
+Relative: M K KHADRIGA (Father) · Age: 47
+
+Reason for removal: Untraceable/Absent
+
+161-C.V. RamannNagar · Booth 94-Govt. Lower Primary Sc
