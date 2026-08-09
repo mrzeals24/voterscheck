@@ -1,5 +1,5 @@
-# Voter Deletion List Search — one database per constituency
-
+# Voter Deletion List Search
+Enables search against few constituencies for voter deletion list pdfs published by CEO website in Aug 2026. 
 Each constituency gets its **own** SQLite file (e.g. `data_175.db`,
 `data_161.db`) instead of one shared database, plus its own page in the
 app. A single manifest file (`constituencies.txt`) controls both which
