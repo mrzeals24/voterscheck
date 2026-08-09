@@ -85,6 +85,14 @@ def get_connection(db_path_str: str):
 
 
 @st.cache_data
+def get_db_constituency(db_path_str: str) -> str:
+    conn = get_connection(db_path_str)
+    cur = conn.execute("SELECT DISTINCT constituency FROM electors ORDER BY constituency")
+    row = cur.fetchone()
+    return row[0] if row else ""
+
+
+@st.cache_data
 def get_booths(db_path_str: str, constituency: str):
     conn = get_connection(db_path_str)
     cur = conn.execute(
@@ -154,13 +162,14 @@ def render_constituency_page(constituency: str, db_filename: str, home_page):
         return
 
     db_path_str = str(db_path)
+    db_constituency = get_db_constituency(db_path_str) or constituency
     st.caption(
         "Search this constituency's voter roll deletion list to check if a "
         "name was flagged for removal (e.g. untraceable, permanently "
         "shifted, deceased, or already enrolled elsewhere)."
     )
 
-    booth_options = get_booths(db_path_str, constituency)
+    booth_options = get_booths(db_path_str, db_constituency)
 
     with st.form(f"search_form_{slugify(constituency)}"):
         booth_choices = st.multiselect(
@@ -177,7 +186,7 @@ def render_constituency_page(constituency: str, db_filename: str, home_page):
         if not name_input and not epic_input:
             st.warning("Enter a name or EPIC number to search.")
         else:
-            cols, rows = search(db_path_str, constituency, booth_choices, name_input, epic_input)
+            cols, rows = search(db_path_str, db_constituency, booth_choices, name_input, epic_input)
             if not rows:
                 st.info("No matching records found in the deletion list.")
             else:

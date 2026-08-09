@@ -1,0 +1,11 @@
+import sqlite3
+conn = sqlite3.connect(r'c:\Users\prash\OneDrive\Prashanth\IdeaProjects\votersworkspace\voterscheck\data_161.db')
+cur = conn.cursor()
+cur.execute("SELECT constituency, booth FROM electors LIMIT 10")
+rows = cur.fetchall()
+print(rows)
+cur.execute("SELECT DISTINCT constituency FROM electors")
+print('constituencies:', cur.fetchall())
+cur.execute("SELECT DISTINCT booth FROM electors ORDER BY booth")
+print('booths:', cur.fetchall())
+conn.close()
