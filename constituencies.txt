@@ -3,24 +3,31 @@
 # Single source of truth for which constituencies exist, used by BOTH:
 #   - streamlit_app.py   (builds the Home page + one page per row that is
 #                          both uncommented AND enabled=True)
-#   - extract_pdfs.py    (extracts zips for rows with extract_needed=True,
-#                          regardless of the enabled column)
+#   - extract_pdfs.py    (extracts zips for rows with extract_needed=True)
+#   - build_database.py  (same rows: extracts if the folder doesn't already
+#                          exist, then builds if the .db doesn't already
+#                          exist — one command does both, and already-done
+#                          work is skipped automatically)
 #
 # Two independent ways to hide a constituency:
-#   - Comment a line out with a leading #  -> skipped EVERYWHERE (app AND
-#     extraction). Use this once a constituency is fully retired/unused.
-#   - Set enabled to False (line stays uncommented) -> extract_pdfs.py can
-#     still process it, build_database.py still writes its .db file, but
-#     it stays OFF the public Streamlit Home page/nav until you flip it to
-#     True. Use this while you're still testing a newly-added constituency.
+#   - Comment a line out with a leading #  -> skipped EVERYWHERE (app,
+#     extraction, and build). Use this once a constituency is fully
+#     retired/unused.
+#   - Set enabled to False (line stays uncommented) -> extract/build still
+#     run for it, but it stays OFF the public Streamlit Home page/nav
+#     until you flip it to True. Use this while testing a new constituency.
+#
+# To force a redo of extraction and/or build for a constituency (e.g. you
+# added more PDFs to its zip), delete its dest_path folder and/or its .db
+# file, then rerun build_database.py — everything else is skipped as-is.
 #
 # Columns (pipe-separated):
 #   constituency   -> must exactly match the "AC: <num>-<name>" text parsed
 #                      from that constituency's PDFs. build_database.py
-#                      prints this exact value after each rebuild -- copy it
+#                      prints this exact value after each run — copy it
 #                      from there rather than retyping it, to avoid typos.
 #   db_filename    -> the per-constituency SQLite file build_database.py
-#                      writes (e.g. data_175.db) -- this is what the deployed
+#                      writes (e.g. data_175.db) — this is what the deployed
 #                      Streamlit app actually reads.
 #   zip_path       -> (local machine only, ignored by the deployed app)
 #                      path to that constituency's source zip. Can be
@@ -29,12 +36,14 @@
 #   dest_path      -> (local machine only, ignored by the deployed app)
 #                      folder to extract that zip's PDFs into. Also can be
 #                      relative, e.g. pdfs\175-Bommanahalli
-#   extract_needed -> True/False -- only rows marked True get extracted the
-#                      next time you run extract_pdfs.py.
-#   enabled        -> True/False -- only rows marked True show up in the
+#   extract_needed -> True/False — rows marked True get extracted AND built
+#                      (each step only if not already done) when you run
+#                      extract_pdfs.py and/or build_database.py.
+#   enabled        -> True/False — only rows marked True show up in the
 #                      Streamlit app (Home page + its own page/URL).
 #
 # constituency|db_filename|zip_path|dest_path|extract_needed|enabled
 175-Bommanahalli|data_175.db|pdfs\AC 175 Bommanahalli-20260808T110311Z-1-001.zip|pdfs\175-Bommanahalli|False|True
 161-CVRamanNagara|data_161.db|pdfs\161-C V Raman Nagara-20260808T110404Z-1-001.zip|pdfs\161-CVRamanNagara|False|True
-170-Basavanagudi|data_170.db|pdfs\AC 170 Basavanagudi-20260808T171645Z-1-001.zip|pdfs\170-Basavanagudi|True|True
+170-Basavanagudi|data_170.db|pdfs\AC 170 Basavanagudi-20260808T171645Z-1-001.zip|pdfs\170-Basavanagudi|False|True
+173-Jayanagar|data_173.db|pdfs\AC 173 Jayanagar-20260809T070546Z-1-001.zip|pdfs\173-Jayanagar|True|True

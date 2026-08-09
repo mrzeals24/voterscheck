@@ -18,11 +18,17 @@ constituencies the app shows and which zips get extracted locally.
 
 - `constituencies.txt` — the manifest. One line per constituency, pipe
   (`|`) separated. Comment a line with a leading `#` to hide it from the
-  Streamlit app AND skip it during PDF extraction.
+  Streamlit app AND skip it during extraction/build.
 - `extract_pdfs.py` — reads the manifest, extracts every constituency's
   zip whose `extract_needed` column is `True`.
-- `build_database.py` — parses PDFs and writes one `.db` file per
-  constituency it finds.
+- `build_database.py` — **also manifest-driven by default, and does
+  extraction too**: with no arguments, for every row flagged
+  `extract_needed=True` it extracts (skipped if the `dest_path` folder
+  already exists) then builds (skipped if the `.db` file already exists).
+  One command handles a brand new constituency end-to-end. A `--pdf-dir`
+  override still exists for scanning an arbitrary folder — handy the very
+  first time you're processing a constituency that isn't in
+  `constituencies.txt` yet.
 - `streamlit_app.py` — the app. Reads the manifest to decide which pages
   to build; each page opens only its own constituency's `.db` file.
 
@@ -60,27 +66,30 @@ Two independent ways to hide a constituency:
 # 1. In constituencies.txt: add a new line (or uncomment an existing one),
 #    with extract_needed set to True for this constituency.
 
-# 2. Extract its PDFs from the zip
-python extract_pdfs.py
+# 2. One command does both extraction AND build:
+python build_database.py
 
-# 3. Build just that constituency's .db file (safe to point at the whole
-#    pdfs/ folder — build_database.py groups by constituency automatically
-#    and only rewrites the file(s) for constituencies it actually finds
-#    PDFs for in this run)
-python build_database.py --pdf-dir pdfs\<new-constituency-folder> --db-dir .
-python build_database.py --pdf-dir pdfs\175-Bommanahalli --db-dir .
+# (Equivalently you can still run `python extract_pdfs.py` first and then
+# `python build_database.py` separately — build_database.py will just see
+# the folder already exists and skip re-extracting it.)
 
-# 4. Console output will print the exact manifest line for this
-#    constituency — confirm it matches what's already in constituencies.txt
-#    (or copy it in if this is a brand new constituency).
+# 3. If this is a brand new constituency not yet in constituencies.txt at
+#    all, use the manual override once to discover it:
+#      python build_database.py --pdf-dir "pdfs\some-folder"
+#    Console output prints the exact manifest line to add.
 
-# 5. Commit and push
+# 4. Commit and push
 git add constituencies.txt data_<ac_number>.db
 git commit -m "Add <constituency> data"
 git push origin main
 
-# 6. On share.streamlit.io: Reboot app (see note below on why)
+# 5. On share.streamlit.io: Reboot app (see note below on why)
 ```
+
+**Forcing a redo**: both extraction and build are skip-if-already-done. If
+you add more PDFs to an existing constituency's zip and need a refresh,
+delete its `dest_path` folder and/or its `.db` file first, then rerun
+`python build_database.py` — only the deleted piece gets redone.
 
 ## Testing a new constituency before making it public
 
@@ -88,8 +97,7 @@ git push origin main
 # In constituencies.txt: add the new line with extract_needed=True and
 # enabled=False (so it's invisible on the live Home page for now)
 
-python extract_pdfs.py
-python build_database.py --pdf-dir pdfs\<new-constituency-folder> --db-dir .
+python build_database.py         # extracts + builds, no arguments needed
 streamlit run streamlit_app.py   # confirm it's NOT on the Home page,
                                   # but you can still verify data_<ac>.db
                                   # locally (e.g. sqlite3 spot-checks)
@@ -142,11 +150,3 @@ loaded PDFs and may not be fully current — always verify voter status on
 the official Karnataka CEO site
 ([ceo.karnataka.gov.in/asddo.html](https://ceo.karnataka.gov.in/asddo.html))
 before taking any action.
-
-M K PRASHANTH · EPIC: WZU3136868
-
-Relative: M K KHADRIGA (Father) · Age: 47
-
-Reason for removal: Untraceable/Absent
-
-161-C.V. RamannNagar · Booth 94-Govt. Lower Primary Sc
